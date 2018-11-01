@@ -1,0 +1,735 @@
+KMD
+00000000:             ; ;----------------------------------------------------------------------------------
+00000000:             ; ;  System Initialiser
+00000000:             ; ;  T. Pritchard
+00000000:             ; ;  Created: February 2017
+00000000:             ; ;  Last Updated: 11 May 2017
+00000000:             ; ;
+00000000:             ; ;  This file initialises both the supervisor and user modes. It then changes to
+00000000:             ; ;  user mode and branches to the user program included in user_program.s
+00000000:             ; ;
+00000000:             ; ;  Known Bugs: None.
+00000000:             ; ;
+00000000:             ; ;----------------------------------------------------------------------------------
+00000000:             ; 
+00000000:             ; org 0                               ;Exception 'vector' table.
+00000000:             ; reset
+00000000: EA000018    ;         B init                      ;Reset
+00000004: EA000027    ;         B halt                      ;Undefined?
+00000008: EA000063    ;         B svc_handler               ;SVC Handler
+0000000C: EA000025    ;         B halt                      ;Prefetch Abort
+00000010: EA000024    ;         B halt                      ;Data Abort
+00000014: E1A00000    ;         NOP                         ;Unused
+00000018: EA000002    ;         B irq_handler               ;IRQ
+0000001C: EAFFFFFF    ;         B fiq_handler               ;FIQ (We don't branch here, we just go straight into the FI
+                      ; Q below)
+00000020:             ;         include interrupt_handler.s ;Include here so we can handle FIQ's quickly, no branching 
+                      ; (code is dumped straight here.)
+00000020:             ; ;----------------------------------------------------------------------------------
+00000020:             ; ;  Interrupt Handler
+00000020:             ; ;  T. Pritchard
+00000020:             ; ;  Created: March 2017
+00000020:             ; ;  Last Updated: 11 May 2017
+00000020:             ; ;
+00000020:             ; ;  Handles all interrupt calls.
+00000020:             ; ;
+00000020:             ; ;  Known Bugs: None.
+00000020:             ; ;
+00000020:             ; ;  Register usage:
+00000020:             ; ;  R0-R6: Pushed and used for handling stuff.
+00000020:             ; ;----------------------------------------------------------------------------------
+00000020:             ; 
+00000020:             ; 
+00000020:             ; fiq_handler                     ;This is never actually branched to, but eh, formatting
+00000020: E92D407F    ;         PUSH {R0 - R6, LR}
+00000024:             ;         ;do FIQ stuff here.
+00000024: EA00000D    ;         b interrupt_return
+00000028:             ; 
+00000028:             ; ;----------------------------------------------------------------------------------
+00000028:             ; ;  Handles any IRQ interrupt.
+00000028:             ; ;  Registers:
+00000028:             ; ;  R0 = Port area
+00000028:             ; ;  R1 = interrupt bits
+00000028:             ; ;  R2 = interrupt enable (probably not needed)
+00000028:             ; ;----------------------------------------------------------------------------------
+00000028:             ; irq_handler
+00000028: E92D407F    ;         PUSH {R0 - R6, LR}
+0000002C: E3A00201    ;         MOV   R0, #port_area    ;For accessing IO
+00000030:             ; 
+00000030: E5D01018    ;         LDRB R1, [R0, #&18]     ;Interrupt bits
+00000034: E5D0201C    ;         LDRB R2, [R0, #&1C]     ;Interrupt enable
+00000038:             ; 
+00000038: E0011002    ;         AND R1, R1, R2          ;We only care about any given bit if both the enable and the in
+                      ; terrupt bit is high.
+0000003C:             ; 
+0000003C: E3510001    ;         CMP R1, #1              ;TODO: Use TST/jump table.
+00000040: 0B000000    ;         BLEQ timer_interrupt
+00000044:             ; 
+00000044: EA000005    ;         B interrupt_return
+00000048:             ; 
+00000048:             ; ;----------------------------------------------------------------------------------
+00000048:             ; ;  Handles a timer interrupt, checking for keyboard output, and prints it to the LCD.
+00000048:             ; ;  Registers:
+00000048:             ; ;  R0 = Port area
+00000048:             ; ;  R1 = load and store timer wait time.
+00000048:             ; ;  R2 = interrupt enable (probably not needed)
+00000048:             ; ;----------------------------------------------------------------------------------
+00000048:             ; timer_interrupt
+00000048: E3A00201    ;         MOV   R0, #port_area    ;For accessing IO
+0000004C:             ; 
+0000004C: E5D01008    ;         LDRB R1, [R0, #&8]      ;Get timer compare register.
+00000050: E2811003    ;         ADD R1, R1, #&3
+00000054: E5C0100C    ;         STRB R1, [R0, #&C]      ;Set timer compare register to a smaller value.
+00000058:             ; 
+00000058: EF000401    ;         SVC &0401               ;Get keyboard output (R12)
+0000005C:             ; 
+0000005C:             ; 
+0000005C: E1A0F00E    ;         MOV PC, LR;
+00000060:             ; 
+00000060:             ; ;----------------------------------------------------------------------------------
+00000060:             ; ;  Called by all SVC instructions to pop registers and return to the program.
+00000060:             ; ;----------------------------------------------------------------------------------
+00000060:             ; interrupt_return
+00000060: E8BD407F    ;         POP {R0 - R6, LR}
+00000064:             ; 
+00000064: E25EF004    ;         SUBS PC, LR, #4         ;Return to the user program.
+00000068:             ; 
+00000068:             ; 
+00000068:             ;                                     ;I/O offsets are kept within each SVC handler to aid modula
+                      ; rity.
+00000068:             ; port_area       EQU     &10000000   ;All I/O addresses are offset from this value.
+00000068:             ; fpga_area       EQU     &20000000   ;All fpga I/O addresses are offset from this value.
+00000068:             ; keypad_storage  EQU     &10000
+00000068:             ; timer_interval  EQU     &03
+00000068:             ; ALIGN
+00000068:             ; 
+00000068:             ; ;----------------------------------------------------------------------------------
+00000068:             ; ;  Initialises all stacks, then branches to user program.
+00000068:             ; ;  Register Usage:
+00000068:             ; ;  R0: port area
+00000068:             ; ;  R1: interrupt enabling, clearing interrupt bits
+00000068:             ; ;----------------------------------------------------------------------------------
+00000068:             ; init
+00000068: E28FDEF9    ;         ADRL  SP, sup_stack     ;Start in Sup mode, allocate supervisor stack.
+0000006C: E28DDA1F    ; 
+00000070:             ; 
+00000070: E3A00201    ;         MOV  R0, #port_area     ;For accessing IO
+00000074: E5D0101C    ;         LDRB  R1, [R0, #&1C]
+00000078: E3811061    ;         ORR R1, R1, #&61        ;Set button and timer interupt enable.
+0000007C: E5C0101C    ;         STRB  R1, [R0, #&1C]
+00000080:             ; 
+00000080: E5D01018    ;         LDRB R1, [R0, #&18]     ;Clear the Interrupt bits
+00000084: E3C110FF    ;         BIC R1, R1, #&FF
+00000088:             ; 
+00000088: E5C01018    ;         STRB R1, [R0, #&18]
+0000008C: EB000006    ;         BL init_stacks
+00000090:             ; 
+00000090: E10F0000    ;         MRS R0, CPSR            ;Change to user mode, begin user program.
+00000094: E3C0001F    ;         BIC R0, R0, #&1F
+00000098: E3800010    ;         ORR R0, R0, #&10
+0000009C: E121F000    ;         MSR CPSR_c, R0
+000000A0: E1A00000    ;         NOP
+000000A4:             ; 
+000000A4: EA00001C    ;         B begin_user_program
+000000A8:             ; 
+000000A8:             ; halt
+000000A8: EAFFFFFE    ;         B halt                  ;End user program.
+000000AC:             ; 
+000000AC:             ; 
+000000AC:             ; ;----------------------------------------------------------------------------------
+000000AC:             ; ;  Initialises all stacks.
+000000AC:             ; ;  Register Usage:
+000000AC:             ; ;  R0: load/store original CPSR.
+000000AC:             ; ;  R1: copy of CPSR to modify it to change modes.
+000000AC:             ; ;----------------------------------------------------------------------------------
+000000AC:             ; init_stacks
+000000AC: E10F0000    ;         MRS R0, CPSR
+000000B0:             ; 
+000000B0: E28FDFD2    ;         ADRL  SP, sup_stack
+000000B4: E28DDB7F    ; 
+000000B8:             ; 
+000000B8: E1A01000    ;         MOV R1, R0              ;Copy CPSR so we can modify it.
+000000BC: E3C1101F    ;         BIC R1, R1, #&1F        ;Clear mode bits
+000000C0: E381101F    ;         ORR R1, R1, #&1F        ;Set mode bits to system
+000000C4: E121F001    ;         MSR CPSR_c, R1
+000000C8: E1A00000    ;         NOP
+000000CC: E28FDFCB    ;         ADRL  SP, usr_stack
+000000D0: E28DDB83    ; 
+000000D4:             ; 
+000000D4: E1A01000    ;         MOV R1, R0              ;Copy CPSR so we can modify it.
+000000D8: E3C1101F    ;         BIC R1, R1, #&1F        ;Clear mode bits
+000000DC: E3811012    ;         ORR R1, R1, #&12        ;Set mode bits to IRQ
+000000E0: E121F001    ;         MSR CPSR_c, R1
+000000E4: E1A00000    ;         NOP
+000000E8: E28FDEF1    ;         ADRL  SP, irq_stack
+000000EC: E28DDA21    ; 
+000000F0:             ; 
+000000F0: E1A01000    ;         MOV R1, R0              ;Copy CPSR so we can modify it.
+000000F4: E3C1101F    ;         BIC R1, R1, #&1F        ;Clear mode bits
+000000F8: E3811011    ;         ORR R1, R1, #&11        ;Set mode bits to IRQ
+000000FC: E121F001    ;         MSR CPSR_c, R1
+00000100: E1A00000    ;         NOP
+00000104: E28FDFBD    ;         ADRL SP, fiq_stack
+00000108: E28DDB8B    ; 
+0000010C:             ; 
+0000010C: E3C000C0    ;         BIC R0, R0, #&C0        ;Enable interrupts (low enable).
+00000110:             ; 
+00000110: E121F000    ;         MSR CPSR_C, R0          ;Return to super mode.
+00000114: E1A00000    ;         NOP
+00000118:             ; 
+00000118: E1A0F00E    ;         MOV PC, LR              ;Return to the sys,
+0000011C:             ; 
+0000011C:             ; 
+0000011C:             ; include user_program.s
+0000011C:             ; ;----------------------------------------------------------------------------------
+0000011C:             ; ;  Stopwatch Program
+0000011C:             ; ;  T. Pritchard
+0000011C:             ; ;  Created: February 2017
+0000011C:             ; ;  Last Updated: 11 May 2017
+0000011C:             ; ;
+0000011C:             ; ;  This is the main file for the user program. It intialises the keypad and then
+0000011C:             ; ;
+0000011C:             ; ;  Keypad Values 0-9 select LEDs, * decreases the LED brightness, and # increases it.
+0000011C:             ; ;  0 turns off all LED's, 9 selects them all.
+0000011C:             ; ;
+0000011C:             ; ;  Known Bugs: None.
+0000011C:             ; ;
+0000011C:             ; ;  Register usage.
+0000011C:             ; ;  R0  = Port Area.
+0000011C:             ; ;  R1  = Keypad Value.
+0000011C:             ; ;  R2  = LED Selection.
+0000011C:             ; ;  R3  = LED Brightness.
+0000011C:             ; ;  R11 = SVC parameter.
+0000011C:             ; ;  R12 = SVC return.
+0000011C:             ; ;----------------------------------------------------------------------------------
+0000011C:             ; 
+0000011C:             ; ;----------------------------------------------------------------------------------
+0000011C:             ; ;  Initialises Backlight then branches into the main program loop.
+0000011C:             ; ;----------------------------------------------------------------------------------
+0000011C:             ; begin_user_program
+0000011C: E3A00201    ;         MOV  R0, #port_area             ;KEEP R0 = port area for duration.
+00000120: EF000400    ;         SVC &0400                       ;Initialise keypad.
+00000124: EAFFFFFF    ;         B main_loop
+00000128:             ; 
+00000128:             ; 
+00000128:             ; ;----------------------------------------------------------------------------------
+00000128:             ; ;  The main program loop. Updates the PWM value of the LED, polls the keypad storage
+00000128:             ; ;  and calls SVC instructions to set the relevant LED values.
+00000128:             ; ;----------------------------------------------------------------------------------
+00000128:             ; main_loop
+00000128: E1A0B002    ;         MOV R11, R2                     ;Put LED selection in SVC parameter (R11)
+0000012C: EF000500    ;         SVC &0500                       ;Update LED PWM.
+00000130:             ; 
+00000130: E3A01801    ;         MOV R1, #keypad_storage         ;Get keypad value.
+00000134: E5D11000    ;         LDRB R1, [R1, #0]
+00000138:             ; 
+00000138: E3510000    ;         CMP R1, #0
+0000013C: 0AFFFFF9    ;         BEQ main_loop                   ;Skip if nothing is held down.
+00000140:             ; 
+00000140: E3510023    ;         CMP R1, #&23                    ;&23 = * key
+00000144: 0A000005    ;                 BEQ inc_brightness
+00000148:             ; 
+00000148: E351002A    ;         CMP R1, #&2A                    ;&2A = # key
+0000014C: 0A000009    ;                 BEQ dec_brightness
+00000150:             ; 
+00000150: E2411030    ;         SUB R1, R1, #&30                ;Convert to 1-8
+00000154: E28F0034    ;         ADR R0, led_table               ;Convert from binary to a one hot representation for th
+                      ; e LEDs
+00000158: E7D02001    ;         LDRB R2, [R0, R1]
+0000015C:             ; 
+0000015C: EAFFFFF1    ;         B main_loop
+00000160:             ; 
+00000160:             ; ;----------------------------------------------------------------------------------
+00000160:             ; ;  Increment the PWM threshold value, ensure it won't overflow (0-FF), and then
+00000160:             ; ;  SVC call to send the new value to the PWM generator.
+00000160:             ; ;----------------------------------------------------------------------------------
+00000160:             ; inc_brightness
+00000160: E2833001    ;         ADD R3, R3, #&1
+00000164:             ; 
+00000164: E35300FF    ;         CMP R3, #&FF
+00000168: C3A030FF    ;         MOVGT R3, #&FF                  ;We don't want to go > 255 and overflow the pwm generat
+                      ; or.
+0000016C:             ; 
+0000016C: E1A0B003    ;         MOV R11, R3                     ;Put the PWM threshold value in the svc parameter.
+00000170: EF000501    ;         SVC &0501                       ;Set the threshold.
+00000174: EAFFFFEB    ;         B main_loop                     ;Go back to loop.
+00000178:             ; 
+00000178:             ; ;----------------------------------------------------------------------------------
+00000178:             ; ;  Decrement the PWM threshold value, ensure it won't underflow (0-FF), and then
+00000178:             ; ;  SVC call to send the new value to the PWM generator.
+00000178:             ; ;----------------------------------------------------------------------------------
+00000178:             ; dec_brightness
+00000178: E2433001    ;         SUB R3, R3, #&1
+0000017C:             ; 
+0000017C: E3530000    ;         CMP R3, #&0
+00000180: B3A03000    ;         MOVLT  R3, #&0                  ;Ensure we don't underflow the PWM generator.
+00000184:             ; 
+00000184: E1A0B003    ;         MOV R11, R3                     ;Put the PWM threshold value in the svc parameter.
+00000188: EF000501    ;         SVC &0501                       ;Set the threshold.
+0000018C: EAFFFFE5    ;         B main_loop                     ;Go back to loop.
+00000190:             ; 
+00000190:             ; 
+00000190: 00 04 40 02 ; led_table    DEFB    0, 4, 64, 2, 32, 1, 16, 8, 128, &FF        ;Maps 0-9 to the LED one hot re
+00000194: 20 01 10 08 ; presentation we need.
+00000198: 80 FF       ; 
+0000019A:             ; 
+0000019C:             ; ALIGN
+0000019C:             ; 
+0000019C:             ; include svc_handler.s
+0000019C:             ; ;----------------------------------------------------------------------------------
+0000019C:             ; ;  Main SVC Table Handler
+0000019C:             ; ;  T. Pritchard
+0000019C:             ; ;  Created: February 2017
+0000019C:             ; ;  Last Updated: 11 May 2017
+0000019C:             ; ;
+0000019C:             ; ;  This file handles selecting a sub-table to handle the SVC call.
+0000019C:             ; ;  SVC handling is done like so:
+0000019C:             ; ;
+0000019C:             ; ;  24 bit field is split up into a two digit table selector and a two digit instruction selecto
+                      ; r.
+0000019C:             ; ;  Bytes 6-7 are Opcode, Bytes 4-5 are ignored (for cleanliness of SVC calls, could easily be e
+                      ; xpanded to use this for additional tables/instructions)
+0000019C:             ; ;  Bytes 2-3 are the table selector, each table being a loosely defined 'type' of svc: lcd inst
+                      ; ructions, timer instructions, etc.
+0000019C:             ; ;  Bytes 0-1 select the instruction within this table., i.e instruction 00 of the LCD table res
+                      ; ets the LCD, etc.
+0000019C:             ; ;
+0000019C:             ; ;
+0000019C:             ; ;  Known Bugs: None.
+0000019C:             ; ;
+0000019C:             ; ;  Register usage:
+0000019C:             ; ;  R0 = SVC instruction getter, then masked to just bits 0-1 (Sub-table instruction selector).
+0000019C:             ; ;  R1 = Table selector.
+0000019C:             ; ;----------------------------------------------------------------------------------
+0000019C:             ; 
+0000019C:             ; ;----------------------------------------------------------------------------------
+0000019C:             ; ;  Selects the instruction table
+0000019C:             ; ;----------------------------------------------------------------------------------
+0000019C:             ; svc_handler
+0000019C: E92D407F    ;         PUSH {R0 - R6, LR}
+000001A0: E51E0004    ;         LDR R0, [LR, #-4]       ;LR is the instruction before the one we're linking back to, lo
+                      ; ad it so we can parse the data.
+000001A4: E3C004FF    ;         BIC R0, R0, #&FF000000  ;Mask off Opcode
+000001A8:             ; 
+000001A8: E2001CFF    ;         AND R1, R0, #&0000FF00  ;Mask off all but table selector
+000001AC: E20000FF    ;         AND R0, R0, #&000000FF  ;Mask off all but instruction selector
+000001B0:             ; 
+000001B0: E3510000    ;         CMP R1, #&0000          ;Standard system stuff
+000001B4: 0A000006    ;         BEQ core_svcs
+000001B8:             ; 
+000001B8:             ;         ;CMP R1, #&0100          ;LCD Stuff
+000001B8:             ;         ;BEQ lcd_svcs
+000001B8:             ; 
+000001B8:             ;         ;CMP R1, #&0200          ;Timer Stuff
+000001B8:             ;         ;BEQ timer_svcs
+000001B8:             ; 
+000001B8:             ;         ;CMP R1, #&0300          ;Button Stuff
+000001B8:             ;         ;BEQ button_svcs
+000001B8:             ; 
+000001B8: E3510B01    ;         CMP R1, #&0400          ;Keypad Stuff.
+000001BC: 0A000007    ;         BEQ keypad_svcs
+000001C0:             ; 
+000001C0: E3510C05    ;         CMP R1, #&0500          ;LED Stuff.
+000001C4: 0A00005F    ;         BEQ led_svcs
+000001C8:             ; 
+000001C8: EAFFFFFF    ;         B svc_return
+000001CC:             ; 
+000001CC:             ; ;----------------------------------------------------------------------------------
+000001CC:             ; ;  Called by all SVC instructions to pop registers and return to the program.
+000001CC:             ; ;----------------------------------------------------------------------------------
+000001CC:             ; svc_return
+000001CC: E8BD407F    ;         POP {R0 - R6, LR}       ;Change from supervisor mode to user mode.
+000001D0: E1B0F00E    ;         MOVS PC, LR             ;Return to the user program.
+000001D4:             ; 
+000001D4:             ; include svcs/core_svcs.s        ;SVC handler files.
+000001D4:             ; ;----------------------------------------------------------------------------------
+000001D4:             ; ;  Core System SVC Table Handler
+000001D4:             ; ;  T. Pritchard
+000001D4:             ; ;  Created: February 2017
+000001D4:             ; ;  Last Updated: 22 March 2017
+000001D4:             ; ;
+000001D4:             ; ;  Handles all core system SVC instructions.
+000001D4:             ; ;  Checks bits 0-1 of R0 in order to get the instruction code for this subset.
+000001D4:             ; ;
+000001D4:             ; ;  Known Bugs: None.
+000001D4:             ; ;----------------------------------------------------------------------------------
+000001D4:             ; 
+000001D4:             ; ;----------------------------------------------------------------------------------
+000001D4:             ; ;  Selects the instruction specific to this table
+000001D4:             ; ;
+000001D4:             ; ;  Register usage.
+000001D4:             ; ;  R0 = Sub table SVC selector.
+000001D4:             ; ;----------------------------------------------------------------------------------
+000001D4:             ; core_svcs
+000001D4:             ;         ;CMP R0, #&00           ;reset program execution.
+000001D4:             ;         ;B reset                ;TODO: This will never work!
+000001D4: E3500001    ;         CMP R0, #&01            ;halt program execution (endless loop in supervisor mode.)
+000001D8: 0BFFFFB2    ;         BLEQ halt
+000001DC:             ; ;        CMP R0, #&02
+000001DC:             ; ;        BLEQ set_irq_enable
+000001DC:             ; ;        CMP R0, #03
+000001DC:             ; ;        BLEQ set_fiq_enable
+000001DC:             ; 
+000001DC:             ;                                 ;If no valid code found, should probably error.
+000001DC: EAFFFFFA    ;         B svc_return            ;End of SVC call, return to user program.
+000001E0:             ; 
+000001E0:             ; 
+000001E0:             ; ;These are currently not used as the concept of user disabling interrupts makes me feel vaguely
+                      ;  uneasy.
+000001E0:             ; ;----------------------------------------------------------------------------------
+000001E0:             ; ;  Sets the IRQ enable bit (7) in the CPSR to R11 (SVC param)
+000001E0:             ; ;
+000001E0:             ; ;  Register usage.
+000001E0:             ; ;  R0 = Load/Save CPSR.
+000001E0:             ; ;----------------------------------------------------------------------------------
+000001E0:             ; ;set_irq_enable
+000001E0:             ; ;        MRS R0, CPSR
+000001E0:             ; ;        BIC R0, R0, #&40
+000001E0:             ; ;        ORR R0, R0, #&40        ;TODO: these only disable, not enable!
+000001E0:             ; ;        MSR CPSR_c, R0
+000001E0:             ; ;        MOV PC, LR              ;Move back to sending method.
+000001E0:             ; 
+000001E0:             ; ;----------------------------------------------------------------------------------
+000001E0:             ; ;  Sets the FIQ enable bit (6) in the CPSR to R11 (SVC param)
+000001E0:             ; ;
+000001E0:             ; ;  Register usage.
+000001E0:             ; ;  R0 = Load/Save CPSR.
+000001E0:             ; ;----------------------------------------------------------------------------------
+000001E0:             ; ;set_fiq_enable
+000001E0:             ; ;        MRS R0, CPSR
+000001E0:             ; ;        BIC R0, R0, #&20
+000001E0:             ; ;        ORR R0, R0, #&20
+000001E0:             ; ;        MSR CPSR_c, R0
+000001E0:             ; ;        MOV PC, LR              ;Move back to sending method.
+000001E0:             ; 
+000001E0:             ; ;include svcs/lcd_svcs.s
+000001E0:             ; ;include svcs/timer_svcs.s
+000001E0:             ; ;include svcs/button_svcs.s
+000001E0:             ; include svcs/keypad_svcs.s
+000001E0:             ; ;----------------------------------------------------------------------------------
+000001E0:             ; ;  Keypad SVC Table Handler
+000001E0:             ; ;  T. Pritchard
+000001E0:             ; ;  Created: February 2017
+000001E0:             ; ;  Last Updated: 11 May 2017
+000001E0:             ; ;
+000001E0:             ; ;  Handles all external keypad related SVC instructions.
+000001E0:             ; ;  Checks bits 0-1 of R0 in order to get the instruction code for this subset.
+000001E0:             ; ;
+000001E0:             ; ;  Known Bugs: None.
+000001E0:             ; ;----------------------------------------------------------------------------------
+000001E0:             ; 
+000001E0:             ; keypad_area              EQU     &20000000
+000001E0:             ; keypad_data              EQU     &2
+000001E0:             ; keypad_control           EQU     &3     ;Offsets kept within sub-tables in order to aid modular
+                      ; ity.
+000001E0:             ; keypad_wait_time         EQU     &0F    ;Time to wait before allowing another key press.
+000001E0:             ; 
+000001E0:             ; ;----------------------------------------------------------------------------------
+000001E0:             ; ;  Selects the instruction specific to this table
+000001E0:             ; ;  R0 = SVC selector
+000001E0:             ; ;----------------------------------------------------------------------------------
+000001E0:             ; keypad_svcs
+000001E0: E3500000    ;         CMP R0, #&00                    ;get button states.
+000001E4: 0B000002    ;         BLEQ init_keypad
+000001E8:             ; 
+000001E8: E3500001    ;         CMP R0, #&01
+000001EC: 0B000016    ;         BLEQ read_keypad
+000001F0:             ; 
+000001F0:             ;                                         ;If no valid code found, should probably error.
+000001F0: EAFFFFF5    ;         B svc_return                    ;End of SVC call, return to user program.
+000001F4:             ; 
+000001F4:             ; ;----------------------------------------------------------------------------------
+000001F4:             ; ;  Sets up keypad, mostly using the control register
+000001F4:             ; ;  Registers:
+000001F4:             ; ;  R0 = Keypad area for offsetting
+000001F4:             ; ;  R1 = Loading and Storing keypad control.
+000001F4:             ; ;----------------------------------------------------------------------------------
+000001F4:             ; init_keypad
+000001F4: E3A00202    ;         MOV  R0, #keypad_area
+000001F8: E5D01003    ;         LDRB  R1, [R0, #keypad_control]
+000001FC: E3C110E0    ;         BIC R1, R1, #&E0                ;Clear bit 5-7
+00000200: E381100F    ;         ORR R1, R1, #&0F                ;Set rows (0-3) to be inputs.
+00000204: E5C01003    ;         STRB R1, [R0, #keypad_control]
+00000208:             ; 
+00000208: E1A0F00E    ;         MOV PC, LR                      ;Return back to the table so we can drop back into user
+                      ;  program.
+0000020C:             ; 
+0000020C:             ; ;----------------------------------------------------------------------------------
+0000020C:             ; ;  Checks to see if we want to display a digit.
+0000020C:             ; ;  Registers:
+0000020C:             ; ;  R0 = Last keyboard key pressed,
+0000020C:             ; ;  R2 = Loaded keyboard data
+0000020C:             ; ;  R4 = Index offset, not used in this method.
+0000020C:             ; ;  R12, svc return, used in this method only if there is nothing pressed.
+0000020C:             ; ;----------------------------------------------------------------------------------
+0000020C:             ; handle_interrupt
+0000020C: E59F0130    ;         LDR R0, keypad_last_key
+00000210: E1500002    ;         CMP R0, R2                      ;Is this the same key as was pressed last time?
+00000214: 1A000030    ;         BNE convert_keypad_char         ;A new key has been pressed, display it reguardless of 
+                      ; wait timer.
+00000218:             ; 
+00000218:             ; 
+00000218: E59F0120    ;         LDR R0, keypad_timer
+0000021C: E3A01003    ;         MOV  R1, #timer_interval
+00000220: E0800001    ;         ADD R0, R0, R1                  ;Add how long we have waited..
+00000224:             ; 
+00000224: E3A0100F    ;         MOV  R1, #keypad_wait_time
+00000228: E1500001    ;         CMP R0, R1
+0000022C: CA00002A    ;         BGT convert_keypad_char         ;We've waited long enough since the last keypress, disp
+                      ; lay it.
+00000230:             ; 
+00000230: E28F1F42    ;         ADR R1, keypad_timer
+00000234: E5010000    ;         STR R0, [R1]
+00000238:             ; 
+00000238: E3A01000    ;         MOV R1, #0
+0000023C: E28F0F6F    ;         ADRL R0, keypad_storage
+00000240: E2800B3F    ; 
+00000244: E5C01000    ;         STRB R1, [R0, #0]
+00000248: E1A0F00E    ;         MOV PC, LR
+0000024C:             ; 
+0000024C:             ; 
+0000024C:             ; ;----------------------------------------------------------------------------------
+0000024C:             ; ;  Checks to see if a digit is pressed in.
+0000024C:             ; ;  Registers:
+0000024C:             ; ;  R0 = Holds keyboard location for offsetting.
+0000024C:             ; ;  R1 = Storing keyboard data.
+0000024C:             ; ;  R2 = Loaded keyboard data
+0000024C:             ; ;  R3 = Bit cleared to check for high columns.
+0000024C:             ; ;  R4 = Index offset.
+0000024C:             ; ;  R12, svc return, used in this method only if there is nothing pressed.
+0000024C:             ; ;----------------------------------------------------------------------------------
+0000024C:             ; read_keypad
+0000024C: E3A00202    ;         MOV  R0, #keypad_area
+00000250: E3A04000    ;         MOV R4, #0
+00000254:             ; 
+00000254: E5D01002    ;         LDRB  R1, [R0, #keypad_data]
+00000258: E3C110E0    ;         BIC R1, R1, #&E0                ;Clear bit 5-7
+0000025C: E3811080    ;         ORR R1, R1, #&80                ;Set column 7 high
+00000260: E5C01002    ;         STRB R1, [R0, #keypad_data]     ;Store this back so we can read whether a row is high.
+00000264: E5D02002    ;         LDRB  R2, [R0, #keypad_data]    ;Load it back, to check rows.
+00000268:             ; 
+00000268: E3C22010    ;         BIC R2, R2, #&10                ;We don't care about bit 4?
+0000026C: E3C230F0    ;         BIC R3, R2, #&F0                ;Remove all data that isn't whether a key is down or no
+                      ; t (but keep it in R1)
+00000270: E3530000    ;         CMP R3, #0                      ;Do checking to see whether any row is high here.
+00000274: 1AFFFFE4    ;         BNE handle_interrupt
+00000278:             ; 
+00000278: E2844004    ;         ADD R4, R4, #4                  ;We're on the next column so offset the jump table inde
+                      ; x.
+0000027C: E3C110E0    ;         BIC R1, R1, #&E0                ;Clear bit 5-7
+00000280: E3811040    ;         ORR R1, R1, #&40                ;Set Column 6 high
+00000284: E5C01002    ;         STRB R1, [R0, #keypad_data]     ;Store this back so we can read whether a row is high.
+00000288: E5D02002    ;         LDRB  R2, [R0, #keypad_data]    ;Load it back, to check rows.
+0000028C:             ; 
+0000028C: E3C22010    ;         BIC R2, R2, #&10                ;We don't care about bit 4?
+00000290: E3C230F0    ;         BIC R3, R2, #&F0                ;Remove all data that isn't whether a key is down or no
+                      ; t (but keep it in R1)
+00000294: E3530000    ;         CMP R3, #0                      ;Do checking to see whether any row is high here.
+00000298: 1AFFFFDB    ;         BNE handle_interrupt
+0000029C:             ; 
+0000029C: E2844004    ;         ADD R4, R4, #4                  ;We're on the next column so offset the jump table inde
+                      ; x.
+000002A0: E3C110E0    ;         BIC R1, R1, #&E0                ;Clear bit 5-7
+000002A4: E3811020    ;         ORR R1, R1, #&20                ;Set Column 5 high
+000002A8: E5C01002    ;         STRB R1, [R0, #keypad_data]     ;Store this back so we can read whether a row is high.
+000002AC: E5D02002    ;         LDRB  R2, [R0, #keypad_data]    ;Load it back, to check rows.
+000002B0:             ; 
+000002B0: E3C22010    ;         BIC R2, R2, #&10                ;We don't care about bit 4?
+000002B4: E3C230F0    ;         BIC R3, R2, #&F0                ;Remove all data that isn't whether a key is down or no
+                      ; t (but keep it in R1)
+000002B8: E3530000    ;         CMP R3, #0                      ;Do checking to see whether any row is high here.
+000002BC: 1AFFFFD2    ;         BNE handle_interrupt
+000002C0:             ; 
+000002C0: E3C110E0    ;         BIC R1, R1, #&E0                ;Clear bit 5-7
+000002C4: E5C01002    ;         STRB R1, [R0, #keypad_data]     ;Store this back.
+000002C8:             ; 
+000002C8: E3A00000    ;         MOV R0, #0
+000002CC: E28F1070    ;         ADR R1, keypad_last_key
+000002D0: E5010000    ;         STR R0, [R1]                    ;Nothing is being displayed, so unset key down.
+000002D4:             ; 
+000002D4: E3A0C000    ;         MOV R12, #0                     ;Nothing pressed, return 0.
+000002D8: E1A0F00E    ;         MOV PC, LR                      ;Return back to the table so we can drop back into user
+                      ;  program.
+000002DC:             ; 
+000002DC:             ; 
+000002DC:             ; ;----------------------------------------------------------------------------------
+000002DC:             ; ;  Converts the matrix position of the keypad to an index in the keypad_table
+000002DC:             ; ;  Registers:
+000002DC:             ; ;  R0 = Clear keypad timer, row data for checking what is high.
+000002DC:             ; ;  R1 = Storing keyboard data.
+000002DC:             ; ;  R2 = Loaded keyboard data
+000002DC:             ; ;  R4 = Index offset.
+000002DC:             ; ;----------------------------------------------------------------------------------
+000002DC:             ; convert_keypad_char
+000002DC: E3A00000    ;         MOV R0, #0
+000002E0: E28F1058    ;         ADR R1, keypad_timer
+000002E4: E5010000    ;         STR R0, [R1]                    ;We've displayed something, restart the bouncing timer.
+000002E8:             ; 
+000002E8: E28F1054    ;         ADR R1, keypad_last_key
+000002EC: E5012000    ;         STR R2, [R1]                    ;Save the last displayed key,
+000002F0:             ; 
+000002F0: E3C200F0    ;         BIC R0, R2, #&F0                ;Remove all data that isn't row related.
+000002F4:             ; 
+000002F4: E3300001    ;         TEQ R0, #&1
+000002F8: 0A000007    ;         BEQ return_key
+000002FC:             ; 
+000002FC: E2844001    ;         ADD R4, R4, #1                 ;Add one to index.
+00000300: E3300002    ;         TEQ R0, #&2                    ;Check if high
+00000304: 0A000004    ;         BEQ return_key                 ;If it is, index is now at the right position in table.
+00000308:             ; 
+00000308: E2844001    ;         ADD R4, R4, #1
+0000030C: E3300004    ;         TEQ R0, #&4
+00000310: 0A000001    ;         BEQ return_key
+00000314:             ; 
+00000314: E2844001    ;         ADD R4, R4, #1
+00000318: EAFFFFFF    ;         B return_key                    ;No need to test, it must be this
+0000031C:             ; 
+0000031C:             ; 
+0000031C:             ; ;----------------------------------------------------------------------------------
+0000031C:             ; ;  Simply returns the value of keypad_table[R4].
+0000031C:             ; ;  Registers:
+0000031C:             ; ;  R0 = Load keypad table address.
+0000031C:             ; ;  R1 = keypad value, ready to be saved.
+0000031C:             ; ;  R2 = Area in memory of the keypad storage.
+0000031C:             ; ;----------------------------------------------------------------------------------
+0000031C:             ; return_key
+0000031C: E28F0010    ;         ADR R0, keypad_table
+00000320: E7D01004    ;         LDRB R1, [R0, R4]
+00000324: E28F00D4    ;         ADRL R0, keypad_storage
+00000328: E2800B3F    ; 
+0000032C: E5C01000    ;         STRB R1, [R0, #0]
+00000330: E1A0F00E    ;         MOV PC, LR
+00000334:             ; 
+00000334:             ; 
+00000334: 31 34 37 2A ; keypad_table    DEFB    &31, &34, &37, &2A, &32, &35, &38, &30, &33, &36, &39, &23
+00000338: 32 35 38 30 ; 
+0000033C: 33 36 39 23 ; 
+00000340: 00000000    ; keypad_timer    DEFW    &0
+00000344: 00000000    ; keypad_last_key DEFW    &0
+00000348:             ; 
+00000348:             ; include svcs/led_svcs.s
+00000348:             ; ;----------------------------------------------------------------------------------
+00000348:             ; ;  LED SVC Table Handler
+00000348:             ; ;  T. Pritchard
+00000348:             ; ;  Created: April 2017
+00000348:             ; ;  Last Updated: 11 May 2017
+00000348:             ; ;
+00000348:             ; ;  Handles all LED related SVC instructions.
+00000348:             ; ;  Checks bits 0-1 of R0 in order to get the instruction code for this subset.
+00000348:             ; ;
+00000348:             ; ;  Known Bugs: None.
+00000348:             ; ;
+00000348:             ; ;  Register usage for instruction selection (functions may be different)
+00000348:             ; ;  R0 = Sub table SVC selector.
+00000348:             ; ;  R1 = Port area for offsetting.
+00000348:             ; ;  R2 = Value to push to lcd to switch LCD backlight on.
+00000348:             ; ;  R11 = SVC Parameter.
+00000348:             ; ;
+00000348:             ; ;
+00000348:             ; ;  Register usage for printing methods
+00000348:             ; ;  R0 = Port Area
+00000348:             ; ;  R1 = R11 Stoarge for print_hex_4
+00000348:             ; ;  R2 = General Purpose port register for print_char.
+00000348:             ; ;  R3 = Port A reading (waiting for idle)
+00000348:             ; ;  R11 = SVC Parameter.
+00000348:             ; ;----------------------------------------------------------------------------------
+00000348:             ; 
+00000348:             ; ;Offsets kept within sub-tables in order to aid modularity.
+00000348:             ; led_port  EQU   &0
+00000348:             ; 
+00000348:             ; 
+00000348:             ; ;----------------------------------------------------------------------------------
+00000348:             ; ;  Selects the instruction specific to this table
+00000348:             ; ;----------------------------------------------------------------------------------
+00000348:             ; led_svcs
+00000348: E3500000    ;         CMP  R0, #&00                   ;Send control signal to LCD.
+0000034C: 0B000004    ;         BLEQ update_led
+00000350: E3500001    ;         CMP  R0, #&01                   ;Send control signal to LCD.
+00000354: 0B00000D    ;         BLEQ set_brightness
+00000358: E3500002    ;         CMP  R0, #&02                   ;Send control signal to LCD.
+0000035C: 0B00000E    ;         BLEQ get_brightness
+00000360:             ;                                         ;If no valid code found, should probably error.
+00000360: EAFFFF99    ;         B    svc_return                 ;End of SVC call, return to user program.
+00000364:             ; 
+00000364:             ; 
+00000364:             ; ;----------------------------------------------------------------------------------
+00000364:             ; ;  updates the value of the LED, on or off.
+00000364:             ; ;----------------------------------------------------------------------------------
+00000364:             ; update_led
+00000364:             ;         ;Read in the PWM Value
+00000364: E3A00202    ;         MOV R0, #fpga_area
+00000368: E5D03004    ;         LDRB R3, [R0, #&4]
+0000036C:             ; 
+0000036C: E3A01201    ;         MOV  R1, #port_area             ;For accessing IO
+00000370: E3530001    ;         CMP R3, #&1
+00000374: 0A000002    ;         BEQ set_high
+00000378: E3A02000    ;         MOV  R2, #&00                   ;Switch on all LED's
+0000037C: E5C12000    ;         STRB R2, [R1, #led_port]        ;offset to get to LED control section.
+00000380: E1A0F00E    ;         MOV  PC, LR                     ;Move back to sending method.
+00000384:             ;         set_high
+00000384: E1A0200B    ;         MOV  R2, R11                    ;Switch on all LED's
+00000388: E5C12000    ;         STRB R2, [R1, #led_port]        ;offset to get to LED control section.
+0000038C: E1A0F00E    ;         MOV  PC, LR                     ;Move back to sending method.
+00000390:             ; 
+00000390:             ; set_brightness
+00000390: E3A00202    ;         MOV R0, #fpga_area
+00000394: E5C0B005    ;         STRB R11, [R0, #&5]
+00000398: E1A0F00E    ;         MOV  PC, LR                     ;Move back to sending method.
+0000039C:             ; 
+0000039C:             ; get_brightness
+0000039C: E3A00202    ;         MOV R0, #fpga_area
+000003A0: E5D0C005    ;         LDRB R12, [R0, #&5]
+000003A4: E1A0F00E    ;         MOV  PC, LR                     ;Move back to sending method.
+000003A8:             ; 
+000003A8:             ; 
+000003A8:             ; 
+000003A8:             ; sup_stack EQU &20000            ;Stack memory allocation (supervisor).
+000003A8:             ; usr_stack EQU &21000
+000003A8:             ; irq_stack EQU &22000
+000003A8:             ; fiq_stack EQU &23000
+000003A8:             ; 
+
+Symbol Table: Labels
+: reset                             00000000  Local -- ARM
+: fiq_handler                       00000020  Local -- ARM
+: irq_handler                       00000028  Local -- ARM
+: timer_interrupt                   00000048  Local -- ARM
+: interrupt_return                  00000060  Local -- ARM
+: port_area                         10000000  Value
+: fpga_area                         20000000  Value
+: keypad_storage                    00010000  Value
+: timer_interval                    00000003  Value
+: init                              00000068  Local -- ARM
+: halt                              000000A8  Local -- ARM
+: init_stacks                       000000AC  Local -- ARM
+: begin_user_program                0000011C  Local -- ARM
+: main_loop                         00000128  Local -- ARM
+: inc_brightness                    00000160  Local -- ARM
+: dec_brightness                    00000178  Local -- ARM
+: led_table                         00000190  Local -- ARM
+: svc_handler                       0000019C  Local -- ARM
+: svc_return                        000001CC  Local -- ARM
+: core_svcs                         000001D4  Local -- ARM
+: keypad_area                       20000000  Value
+: keypad_data                       00000002  Value
+: keypad_control                    00000003  Value
+: keypad_wait_time                  0000000F  Value
+: keypad_svcs                       000001E0  Local -- ARM
+: init_keypad                       000001F4  Local -- ARM
+: handle_interrupt                  0000020C  Local -- ARM
+: read_keypad                       0000024C  Local -- ARM
+: convert_keypad_char               000002DC  Local -- ARM
+: return_key                        0000031C  Local -- ARM
+: keypad_table                      00000334  Local -- ARM
+: keypad_timer                      00000340  Local -- ARM
+: keypad_last_key                   00000344  Local -- ARM
+: led_port                          00000000  Value
+: led_svcs                          00000348  Local -- ARM
+: update_led                        00000364  Local -- ARM
+: set_high                          00000384  Local -- ARM
+: set_brightness                    00000390  Local -- ARM
+: get_brightness                    0000039C  Local -- ARM
+: sup_stack                         00020000  Value
+: usr_stack                         00021000  Value
+: irq_stack                         00022000  Value
+: fiq_stack                         00023000  Value

@@ -1,0 +1,46 @@
+Enable SVCs calling other SVCs - Store CPSR
+        This would enable much nicer keypad handling, rather than having 2 SVC calls in the interrupt.
+Move SVCs to jump table.
+Figure out some way of handling interrupts in user mode.
+Convert CMPs to TSTs, where applicable - mostly in SVCs.
+Move LCD svs register definitions into method descriptions.
+
+
+
+
+
+
+
+PWM generator
+        input value n
+
+generator has a counter, c, which repeatedly goes from 0-m at clock speed.
+if c > n, output = 1
+else output = 0
+
+
+
+
+
+ledVal = 0;
+
+user_program
+        get button input
+        if # is down
+                ledVal++;
+                svc call to set PWM value in hardware
+
+
+
+        interrupt
+                get pwm value from hardware
+                set pwm value to LED
+
+
+reg select must be high, and not write (NWR) must be low in order for anything to go to the latch.
+if the mux is high (a0), it outputs the threshold that we inputted, otherwise it outputs the generated PWM.
+
+
+
+20000003 = threshold
+20000002 = PWM out.
